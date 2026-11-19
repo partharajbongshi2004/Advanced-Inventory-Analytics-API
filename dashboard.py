@@ -267,4 +267,20 @@ elif menu == "Record Sale":
                         total_profit = round(
                             (float(current_item["price"]) - float(current_item["cost_price"])) * int(quantity),
                             2,
+                        ) 
+                        cursor.execute(
+                            "UPDATE products SET stock = ? WHERE id = ?" ,
+                            (new_stock, int(selected_product["id"])),
+
                         )
+                        cursor.execute(
+                            "INSERT INTO sales (product_id, quantity, total_reveneu, total_profit) VALUES (?,?,?,?,)" ,
+                            (int(selected_product["id"]),int(quantity), total_reveneu, total_profit),
+
+                        )
+                        conn.commit()
+                        st.success (f"Sale recorded! Reveneu: ${total_reveneu:.2f} | Profit: $(total_profit:.2f}")
+except Exception as e :
+    st.error(f"Database error: {e}")
+finally:
+conn.close()
