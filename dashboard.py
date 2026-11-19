@@ -268,4 +268,4 @@ elif menu == "Record Sale":
                     else:
                         new_stock = current_item["stock"] - int(quantity)
                         total_revenue = round(float(current_item["price"]) * int(quantity), 2)
-                        total_profit = round(
+                        total_profit = round(total_profit,2)
