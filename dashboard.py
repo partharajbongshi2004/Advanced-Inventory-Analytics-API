@@ -16,7 +16,7 @@ if menu == "Analytics & Inventory":
     conn.close()
 
     c1, c2, c3 = st.columns(3)
-    c1.metric("Total Revenue", f"${sales:,.2f}")
+    c1.metric("Total Revenue", f"${sales[0]:,.2f}")
     c2.metric("Total Net Profit", f"${sales[1]:,.2f}")
     c3.metric("Total Stock", int(products["stock"].sum()) if not products.empty else 0)
 
