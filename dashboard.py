@@ -114,7 +114,6 @@ if menu == "Analytics & Inventory":
     # Full Inventory Table
     st.subheader("📦 Full Clothing Inventory")
     if not products_df.empty:
-        # Optional quick filters for convenience
         filter_col1, filter_col2 = st.columns(2)
         with filter_col1:
             categories = ["All"] + sorted(products_df["category"].unique().tolist())
@@ -219,7 +218,6 @@ elif menu == "Record Sale":
     if available_df.empty:
         st.warning("No products with available stock! Please add products or restock existing ones first.")
     else:
-        # Build readable labels mapped to product rows
         product_options = {
             f"{row['name']} | Size: {row['size']} | ${row['price']:.2f} ({row['stock']} in stock)": row
             for _, row in available_df.iterrows()
@@ -239,7 +237,6 @@ elif menu == "Record Sale":
                 step=1,
             )
 
-            # Live financial preview
             est_revenue = round(float(selected_product["price"]) * quantity, 2)
             est_profit = round(
                 (float(selected_product["price"]) - float(selected_product["cost_price"])) * quantity,
@@ -256,7 +253,6 @@ elif menu == "Record Sale":
                 conn = get_db_connection()
                 try:
                     cursor = conn.cursor()
-                    # Re-verify current stock inside transaction
                     cursor.execute(
                         "SELECT stock, price, cost_price FROM products WHERE id = ?",
                         (int(selected_product["id"]),),
@@ -268,4 +264,7 @@ elif menu == "Record Sale":
                     else:
                         new_stock = current_item["stock"] - int(quantity)
                         total_revenue = round(float(current_item["price"]) * int(quantity), 2)
-                        total_profit = round(total_profit,2)
+                        total_profit = round(
+                            (float(current_item["price"]) - float(current_item["cost_price"])) * int(quantity),
+                            2,
+                        )
