@@ -1,286 +1,78 @@
 from datetime import datetime, timezone
-import sqlite3
 import pandas as pd
 import streamlit as st
-
 from database import get_db_connection, init_db
 
-# --- Page Configuration ---
-st.set_page_config(
-    page_title="Clothing Store Inventory & Analytics",
-    page_icon="👕",
-    layout="wide",
-)
-
-# --- Initialize Database Automatically ---
+st.set_page_config(page_title="Inventory & Analytics", page_icon="👕", layout="wide")
 init_db()
 
+menu = st.sidebar.radio("Menu", ["Analytics & Inventory", "Add Product", "Record Sale"])
 
-# --- Helper Functions ---
-def fetch_products() -> pd.DataFrame:
-    """Fetches all products from the SQLite database as a pandas DataFrame."""
-    conn = get_db_connection()
-    try:
-        df = pd.read_sql_query("SELECT * FROM products ORDER BY id DESC", conn)
-    finally:
-        conn.close()
-    return df
-
-
-def fetch_sales_summary() -> dict:
-    """Fetches total revenue and total profit from the sales table."""
-    conn = get_db_connection()
-    try:
-        cursor = conn.cursor()
-        cursor.execute(
-            """
-            SELECT
-                COALESCE(SUM(total_revenue), 0.0) AS total_revenue,
-                COALESCE(SUM(total_profit), 0.0) AS total_profit
-            FROM sales
-            """
-        )
-        row = cursor.fetchone()
-        return {
-            "total_revenue": float(row["total_revenue"]),
-            "total_profit": float(row["total_profit"]),
-        }
-    finally:
-        conn.close()
-
-
-# --- Sidebar Navigation ---
-st.sidebar.title("👕 Store Manager")
-st.sidebar.markdown("Manage clothing inventory, record sales, and track profits.")
-
-menu = st.sidebar.radio(
-    "Navigation",
-    options=["Analytics & Inventory", "Add Product", "Record Sale"],
-    index=0,
-)
-
-# ==========================================
-# 1. ANALYTICS & INVENTORY VIEW
-# ==========================================
 if menu == "Analytics & Inventory":
-    st.title("📊 Analytics & Inventory Overview")
+    st.title("📊 Analytics & Inventory")
+    conn = get_db_connection()
+    products = pd.read_sql_query("SELECT * FROM products", conn)
+    sales = conn.execute("SELECT COALESCE(SUM(total_revenue),0), COALESCE(SUM(total_profit),0) FROM sales").fetchone()
+    conn.close()
 
-    products_df = fetch_products()
-    sales_summary = fetch_sales_summary()
+    c1, c2, c3 = st.columns(3)
+    c1.metric("Total Revenue", f"${sales:,.2f}")
+    c2.metric("Total Net Profit", f"${sales[1]:,.2f}")
+    c3.metric("Total Stock", int(products["stock"].sum()) if not products.empty else 0)
 
-    total_stock = int(products_df["stock"].sum()) if not products_df.empty else 0
+    if not products.empty:
+        low = products[products["stock"] <= products["min_stock_threshold"]]
+        if not low.empty:
+            st.warning("⚠️ Low-Stock Products")
+            st.dataframe(low, use_container_width=True, hide_index=True)
+        st.subheader("📦 Full Inventory")
+        st.dataframe(products, use_container_width=True, hide_index=True)
 
-    # Key Metrics Row
-    col1, col2, col3 = st.columns(3)
-    col1.metric(
-        label="Total Revenue",
-        value=f"${sales_summary['total_revenue']:,.2f}",
-    )
-    col2.metric(
-        label="Total Net Profit",
-        value=f"${sales_summary['total_profit']:,.2f}",
-    )
-    col3.metric(
-        label="Total Items in Stock",
-        value=f"{total_stock:,}",
-    )
-
-    st.divider()
-
-    # Low-Stock Alerts Section (stock <= min_stock_threshold)
-    st.subheader("⚠️ Low-Stock Alerts")
-    if not products_df.empty:
-        low_stock_df = products_df[
-            products_df["stock"] <= products_df["min_stock_threshold"]
-        ]
-        if not low_stock_df.empty:
-            st.warning(
-                f"{len(low_stock_df)} product(s) are at or below their minimum stock threshold!"
-            )
-            st.dataframe(
-                low_stock_df[
-                    ["id", "name", "category", "size", "stock", "min_stock_threshold"]
-                ],
-                use_container_width=True,
-                hide_index=True,
-            )
-        else:
-            st.success("All products are sufficiently stocked above minimum thresholds.")
-    else:
-        st.info("No products in inventory yet.")
-
-    st.divider()
-
-    # Full Inventory Table
-    st.subheader("📦 Full Clothing Inventory")
-    if not products_df.empty:
-        filter_col1, filter_col2 = st.columns(2)
-        with filter_col1:
-            categories = ["All"] + sorted(products_df["category"].unique().tolist())
-            selected_category = st.selectbox("Filter by Category", categories)
-        with filter_col2:
-            sizes = ["All"] + sorted(products_df["size"].unique().tolist())
-            selected_size = st.selectbox("Filter by Size", sizes)
-
-        filtered_df = products_df.copy()
-        if selected_category != "All":
-            filtered_df = filtered_df[filtered_df["category"] == selected_category]
-        if selected_size != "All":
-            filtered_df = filtered_df[filtered_df["size"] == selected_size]
-
-        st.dataframe(
-            filtered_df,
-            use_container_width=True,
-            hide_index=True,
-            column_config={
-                "id": "ID",
-                "name": "Product Name",
-                "category": "Category",
-                "size": "Size",
-                "price": st.column_config.NumberColumn("Retail Price", format="$%.2f"),
-                "cost_price": st.column_config.NumberColumn("Cost Price", format="$%.2f"),
-                "stock": "In Stock",
-                "min_stock_threshold": "Min Threshold",
-            },
-        )
-    else:
-        st.info("Your inventory is empty. Go to **Add Product** in the sidebar to add items.")
-
-# ==========================================
-# 2. ADD PRODUCT VIEW
-# ==========================================
 elif menu == "Add Product":
-    st.title("➕ Add New Clothing Product")
-    st.markdown("Enter product details below to add a new item to the inventory.")
+    st.title("➕ Add Product")
+    with st.form("add", clear_on_submit=True):
+        name = st.text_input("Name")
+        cat = st.text_input("Category", "Tops")
+        size = st.selectbox("Size", ["XS", "S", "M", "L", "XL", "XXL"])
+        price = st.number_input("Price", min_value=0.1, value=25.0)
+        cost = st.number_input("Cost Price", min_value=0.0, value=10.0)
+        stock = st.number_input("Stock", min_value=0, step=1, value=10)
+        thresh = st.number_input("Min Stock Threshold", min_value=0, step=1, value=5)
 
-    with st.form("add_product_form", clear_on_submit=True):
-        col1, col2 = st.columns(2)
-
-        with col1:
-            name = st.text_input("Product Name *", placeholder="e.g., Classic Cotton T-Shirt")
-            category = st.selectbox(
-                "Category *",
-                options=["Tops", "Bottoms", "Outerwear", "Dresses", "Activewear", "Accessories", "Footwear"],
+        if st.form_submit_button("Save Product") and name.strip():
+            conn = get_db_connection()
+            conn.execute(
+                "INSERT INTO products (name, category, size, price, cost_price, stock, min_stock_threshold) VALUES (?,?,?,?,?,?,?)",
+                (name.strip(), cat.strip(), size, price, cost, stock, thresh),
             )
-            size = st.selectbox(
-                "Size *",
-                options=["XS", "S", "M", "L", "XL", "XXL", "One Size"],
-            )
-            stock = st.number_input("Initial Stock Quantity *", min_value=0, step=1, value=10)
+            conn.commit()
+            conn.close()
+            st.success(f"{name} added!")
 
-        with col2:
-            price = st.number_input("Retail Price ($) *", min_value=0.01, step=0.50, value=29.99, format="%.2f")
-            cost_price = st.number_input("Wholesale Cost Price ($) *", min_value=0.00, step=0.50, value=10.00, format="%.2f")
-            min_stock_threshold = st.number_input("Minimum Stock Alert Threshold *", min_value=0, step=1, value=5)
-
-        submitted = st.form_submit_button("Save Product", type="primary", use_container_width=True)
-
-        if submitted:
-            if not name.strip():
-                st.error("Product Name is required.")
-            else:
-                conn = get_db_connection()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        """
-                        INSERT INTO products (name, category, size, price, cost_price, stock, min_stock_threshold)
-                        VALUES (?, ?, ?, ?, ?, ?, ?)
-                        """,
-                        (
-                            name.strip(),
-                            category,
-                            size,
-                            round(float(price), 2),
-                            round(float(cost_price), 2),
-                            int(stock),
-                            int(min_stock_threshold),
-                        ),
-                    )
-                    conn.commit()
-                    st.success(f"Successfully added **{name.strip()}** (Size: {size}) to inventory!")
-                except sqlite3.Error as e:
-                    conn.rollback()
-                    st.error(f"Database error: {e}")
-                finally:
-                    conn.close()
-
-# ==========================================
-# 3. RECORD SALE VIEW
-# ==========================================
 elif menu == "Record Sale":
-    st.title("🛒 Record a Sale")
-    st.markdown("Select an in-stock product and enter the quantity sold.")
+    st.title("🛒 Record Sale")
+    conn = get_db_connection()
+    df = pd.read_sql_query("SELECT * FROM products WHERE stock > 0", conn)
+    conn.close()
 
-    products_df = fetch_products()
-    available_df = products_df[products_df["stock"] > 0] if not products_df.empty else pd.DataFrame()
-
-    if available_df.empty:
-        st.warning("No products with available stock! Please add products or restock existing ones first.")
+    if df.empty:
+        st.warning("No stock available!")
     else:
-        product_options = {
-            f"{row['name']} | Size: {row['size']} | ${row['price']:.2f} ({row['stock']} in stock)": row
-            for _, row in available_df.iterrows()
-        }
+        options = {f"{r['name']} ({r['size']}) - ${r['price']} [Stock: {r['stock']}]": r for _, r in df.iterrows()}
+        choice = st.selectbox("Select Product", list(options.keys()))
+        item = options[choice]
+        qty = st.number_input("Quantity", min_value=1, max_value=int(item["stock"]), step=1)
 
-        selected_label = st.selectbox("Select Product", options=list(product_options.keys()))
-        selected_product = product_options[selected_label]
-
-        max_qty = int(selected_product["stock"])
-
-        with st.form("record_sale_form"):
-            quantity = st.number_input(
-                "Quantity Sold",
-                min_value=1,
-                max_value=max_qty,
-                value=1,
-                step=1,
+        if st.button("Complete Sale"):
+            rev = round(float(item["price"]) * qty, 2)
+            prof = round((float(item["price"]) - float(item["cost_price"])) * qty, 2)
+            conn = get_db_connection()
+            conn.execute("UPDATE products SET stock = stock - ? WHERE id = ?", (qty, int(item["id"])))
+            conn.execute(
+                "INSERT INTO sales (product_id, quantity, total_revenue, total_profit, sale_date) VALUES (?,?,?,?,?)",
+                (int(item["id"]), qty, rev, prof, datetime.now(timezone.utc).isoformat()),
             )
-
-            est_revenue = round(float(selected_product["price"]) * quantity, 2)
-            est_profit = round(
-                (float(selected_product["price"]) - float(selected_product["cost_price"])) * quantity,
-                2,
-            )
-
-            st.info(
-                f"**Order Summary:** Revenue: **${est_revenue:,.2f}** | Estimated Profit: **${est_profit:,.2f}**"
-            )
-
-            sale_submitted = st.form_submit_button("Complete Sale", type="primary", use_container_width=True)
-
-            if sale_submitted:
-                conn = get_db_connection()
-                try:
-                    cursor = conn.cursor()
-                    cursor.execute(
-                        "SELECT stock, price, cost_price FROM products WHERE id = ?",
-                        (int(selected_product["id"]),),
-                    )
-                    current_item = cursor.fetchone()
-
-                    if not current_item or current_item["stock"] < quantity:
-                        st.error("Insufficient stock available to complete this sale.")
-                    else:
-                        new_stock = current_item["stock"] - int(quantity)
-                        total_revenue = round(float(current_item["price"]) * int(quantity), 2)
-                        total_profit = round(
-                            (float(current_item["price"]) - float(current_item["cost_price"])) * int(quantity),
-                            2,
-                        ) 
-                        cursor.execute(
-                            "UPDATE products SET stock = ? WHERE id = ?" ,
-                            (new_stock, int(selected_product["id"])),
-
-                        )
-                        cursor.execute(
-                            "INSERT INTO sales (product_id, quantity, total_reveneu, total_profit) VALUES (?,?,?,?,)" ,
-                            (int(selected_product["id"]),int(quantity), total_reveneu, total_profit),
-
-                        )
-                        conn.commit()
-                        st.success (f"Sale recorded! Reveneu: ${total_reveneu:.2f} | Profit: $(total_profit:.2f}")
-except Exception as e :
-    st.error(f"Database error: {e}")
-finally:
-conn.close()
+            conn.commit()
+            conn.close()
+            st.success(f"Sold {qty}x {item['name']} | Revenue: ${rev} | Profit: ${prof}")
+            st.rerun()
